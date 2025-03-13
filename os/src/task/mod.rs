@@ -13,12 +13,14 @@ mod context;
 mod switch;
 #[allow(clippy::module_inception)]
 mod task;
-
+use crate::timer::get_time_us;
+use crate::task::task::TimeVal;
 use crate::config::MAX_APP_NUM;
 use crate::loader::{get_num_app, init_app_cx};
 use crate::sync::UPSafeCell;
 use lazy_static::*;
 use switch::__switch;
+use crate::config::MAX_SYSCALL_NUM;
 pub use task::{TaskControlBlock, TaskStatus};
 
 pub use context::TaskContext;
@@ -54,6 +56,8 @@ lazy_static! {
         let mut tasks = [TaskControlBlock {
             task_cx: TaskContext::zero_init(),
             task_status: TaskStatus::UnInit,
+            first_call_time:None,
+            syscall_times: [0; MAX_SYSCALL_NUM],
         }; MAX_APP_NUM];
         for (i, task) in tasks.iter_mut().enumerate() {
             task.task_cx = TaskContext::goto_restore(init_app_cx(i));
@@ -123,6 +127,17 @@ impl TaskManager {
             let current = inner.current_task;
             inner.tasks[next].task_status = TaskStatus::Running;
             inner.current_task = next;
+            //记录第一次调用时间
+            if let Some(_x)=inner.tasks[next].first_call_time{
+                
+            }
+            else {
+                let us =get_time_us();
+                inner.tasks[next].first_call_time=Some(TimeVal {
+                    sec: us / 1_000_000,
+                    usec: us % 1_000_000,
+                });
+            }
             let current_task_cx_ptr = &mut inner.tasks[current].task_cx as *mut TaskContext;
             let next_task_cx_ptr = &inner.tasks[next].task_cx as *const TaskContext;
             drop(inner);
@@ -134,6 +149,39 @@ impl TaskManager {
         } else {
             panic!("All applications completed!");
         }
+    }
+///
+    pub fn read_num_app(&self)->usize{
+        self.num_app
+    }
+///
+    pub fn read_inner(&self)->TaskControlBlock{
+       let inner =self.inner.exclusive_access();
+       inner.tasks[inner.current_task].clone()
+    }
+///
+    pub  fn  read_current_task(&self)->usize{
+        self.inner.exclusive_access().current_task
+    }
+///
+    pub fn read_inner_systimes_updata(&self,sys_call_id:usize){
+        let inner =& mut self.inner.exclusive_access();
+        let current=inner.current_task;
+        inner.tasks[current].syscall_times[sys_call_id]+=1;
+        //if current==2{
+        //println!("the app is{} syscalltime is {} sys_call_id is {}",current,inner.tasks[current].syscall_times[sys_call_id],sys_call_id)
+        //}
+    }
+}
+
+impl TaskManagerInner{
+    ///
+    pub fn read_tasks(&self)->[TaskControlBlock; MAX_APP_NUM]{
+        self.tasks
+    }
+///
+    pub fn read_current_task(&self)->usize{
+        self.current_task
     }
 }
 
